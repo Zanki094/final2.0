@@ -1036,5 +1036,82 @@ $("hw-add2").addEventListener("click",function(){T("hw_line")});
 $("hw-cid").onclick=function(){T("hw_copyid");var b=this;copy($("hw-id").textContent,function(){b.textContent="คัดลอกแล้ว";setTimeout(function(){b.textContent="คัดลอก LINE ID"},2000)})};
 })();
 </script>
+ /**
+ * บันทึกการเข้าใช้งานเว็บทุกครั้งลง Google Sheet
+ *
+ * วิธีใช้: เปิดจากชีตที่ Extensions > Apps Script แล้ววางโค้ดนี้ทั้งหมด
+ * จากนั้น Deploy > New deployment > Web app
+ *   Execute as: Me / Who has access: Anyone
+ *
+ * ไม่ต้องใส่ SHEET_ID เพราะสคริปต์ผูกกับชีตที่เปิดมา
+ * ถ้าไม่มีแท็บชื่อ "Visits" สคริปต์จะสร้างให้อัตโนมัติ
+ */
+
+const SHEET_NAME = 'Visits';
+const TIMEZONE = 'Asia/Bangkok';
+const HEADERS = ['เวลา', 'เหตุการณ์', 'รายละเอียด', 'Session', 'หน้าเว็บ', 'อุปกรณ์'];
+
+function getSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(SHEET_NAME);
+  if (!sh) {
+    sh = ss.insertSheet(SHEET_NAME);
+    sh.appendRow(HEADERS);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function json_(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// รับข้อมูลจากเว็บ แล้วเพิ่ม 1 แถวต่อ 1 เหตุการณ์
+function doPost(e) {
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000); // กันข้อมูลทับกันเมื่อหลายคนเข้าพร้อมกัน
+
+    let data = {};
+    try {
+      data = JSON.parse(e.postData.contents);
+    } catch (err) {
+      data = e.parameter || {};
+    }
+
+    getSheet_().appendRow([
+      Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd HH:mm:ss'),
+      String(data.event || 'visit').slice(0, 100),
+      String(data.detail || '').slice(0, 500),
+      String(data.session || '').slice(0, 50),
+      String(data.page || '').slice(0, 200),
+      String(data.ua || '').slice(0, 300)
+    ]);
+
+    return json_({ ok: true });
+  } catch (err) {
+    return json_({ ok: false, error: String(err) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// สรุปสถิติ (ใช้ให้แดชบอร์ดดึงไปแสดงได้ภายหลัง)
+function doGet(e) {
+  const rows = getSheet_().getDataRange().getValues().slice(1);
+  const today = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy-MM-dd');
+  const counts = {};
+  let todayCount = 0;
+
+  rows.forEach(function (r) {
+    const event = r[1];
+    counts[event] = (counts[event] || 0) + 1;
+    if (String(r[0]).indexOf(today) === 0) todayCount++;
+  });
+
+  return json_({ ok: true, total: rows.length, today: todayCount, counts: counts });
+}
 </body>
 </html>
